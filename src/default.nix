@@ -19,16 +19,11 @@ let
     in
     (if e.success then e.value else { error = fn { }; }) // { __functor = _self: fn; };
 
-  # https://github.com/NixOS/nixpkgs/blob/0258808f5744ca980b9a1f24fe0b1e6f0fecee9c/lib/lists.nix#L295
-  range =
-    first: last: if first > last then [ ] else builtins.genList (n: first + n) (last - first + 1);
-
-  # https://github.com/NixOS/nixpkgs/blob/0258808f5744ca980b9a1f24fe0b1e6f0fecee9c/lib/strings.nix#L257
-  stringToCharacters = s: map (p: builtins.substring p 1 s) (range 0 (builtins.stringLength s - 1));
-
-  # https://github.com/NixOS/nixpkgs/blob/0258808f5744ca980b9a1f24fe0b1e6f0fecee9c/lib/strings.nix#L269
-  stringAsChars = f: s: concatStrings (map f (stringToCharacters s));
-  concatStrings = builtins.concatStringsSep "";
+  stringAsChars =
+    func: string:
+    builtins.concatStringsSep "" (
+      builtins.genList (index: func (builtins.substring index 1 string)) (builtins.stringLength string)
+    );
 
   # If the environment variable NPINS_OVERRIDE_${name} is set, then use
   # the path directly as opposed to the fetched source.
