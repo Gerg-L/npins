@@ -92,20 +92,16 @@ let
 
       # Dispatch to the correct code path based on the type
       path =
-        if spec.type == "Git" then
-          mkGitSource fetchers spec
-        else if spec.type == "GitRelease" then
-          mkGitSource fetchers spec
-        else if spec.type == "PyPi" then
-          mkPyPiSource fetchers spec
-        else if spec.type == "Channel" then
-          mkChannelSource fetchers spec
-        else if spec.type == "Tarball" then
-          mkTarballSource fetchers spec
-        else if spec.type == "Container" then
-          mkContainerSource pkgs spec
-        else
-          builtins.throw "Unknown source type ${spec.type}";
+        {
+          Git = mkGitSource fetchers spec;
+          GitRelease = mkGitSource fetchers spec;
+          PyPi = mkPyPiSource fetchers spec;
+          Channel = mkChannelSource fetchers spec;
+          Tarball = mkTarballSource fetchers spec;
+          Container = mkContainerSource pkgs spec;
+        }
+        .${spec.type} or builtins.throw
+        "Unknown source type ${spec.type}";
     in
     spec // { outPath = mayOverride name path; };
 
