@@ -56,32 +56,26 @@ let
     let
       path =
         let
-          sharedGitArgs =
-            repo:
-            let
-              url =
-                {
-                  Git = repo.url;
-                  GitHub = "https://github.com/${repo.owner}/${repo.repo}.git";
-                  GitLab = "${repo.server}/${repo.repo_path}.git";
-                }
-                .${repo.type} or (throw "Unrecognized repository type ${repo.type}");
-              urlToName =
-                url: rev:
-                let
-                  matched = builtins.match "^.*/([^/]*)(\\.git)?$" url;
+          sharedGitArgs = repo: rec {
+            name =
+              let
+                matched = builtins.match "^.*/([^/]*)(\\.git)?$" url;
+                appendShort =
+                  if (builtins.match "[a-f0-9]*" spec.revision) != null then
+                    "-${builtins.substring 0 7 spec.revision}"
+                  else
+                    "";
+              in
+              "${if matched == null then "source" else builtins.head matched}${appendShort}";
 
-                  short = builtins.substring 0 7 rev;
-
-                  appendShort = if (builtins.match "[a-f0-9]*" rev) != null then "-${short}" else "";
-                in
-                "${if matched == null then "source" else builtins.head matched}${appendShort}";
-
-              name = urlToName url spec.revision;
-            in
-            {
-              inherit name url;
-            };
+            url =
+              {
+                Git = repo.url;
+                GitHub = "https://github.com/${repo.owner}/${repo.repo}.git";
+                GitLab = "${repo.server}/${repo.repo_path}.git";
+              }
+              .${repo.type} or (throw "Unrecognized repository type ${repo.type}");
+          };
         in
         (
           if pkgs == null then
@@ -186,14 +180,11 @@ mkFunctor (
   if version == 7 then
     builtins.mapAttrs (
       name: spec:
-      let
-        res = mkFunctor (mkSource name spec);
-      in
       if pkgs == null then
         #load bearing comment
-        res
+        mkFunctor (mkSource name spec)
       else
-        res pkgs
+        mkSource name spec { inherit pkgs; }
     ) data.pins
   else
     throw "Unsupported format version ${toString version} in sources.json. Try running `npins upgrade`"
