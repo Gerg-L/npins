@@ -92,7 +92,7 @@ let
 
               Git =
                 assert spec.repository ? type;
-                if spec.url or null == null && !spec.submodules then
+                if spec.url or null != null && !spec.submodules then
                   Tarball
                 else
                   (builtins.fetchGit (
@@ -165,6 +165,7 @@ in
 mkFunctor (
   {
     input ? ./sources.json,
+    pkgs ? null,
   }:
   let
     data =
@@ -183,7 +184,17 @@ mkFunctor (
     inherit (data) version;
   in
   if version == 7 then
-    builtins.mapAttrs (name: spec: mkFunctor (mkSource name spec)) data.pins
+    builtins.mapAttrs (
+      name: spec:
+      let
+        res = mkFunctor (mkSource name spec);
+      in
+      if pkgs == null then
+        #load bearing comment
+        res
+      else
+        res pkgs
+    ) data.pins
   else
     throw "Unsupported format version ${toString version} in sources.json. Try running `npins upgrade`"
 )
