@@ -64,6 +64,7 @@ let
                   Git = repo.url;
                   GitHub = "https://github.com/${repo.owner}/${repo.repo}.git";
                   GitLab = "${repo.server}/${repo.repo_path}.git";
+                  Forgejo = "${repo.server}/${repo.owner}/${repo.repo}.git";
                 }
                 .${repo.type} or (throw "Unrecognized repository type ${repo.type}");
               urlToName =
