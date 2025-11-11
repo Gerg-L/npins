@@ -19,12 +19,6 @@ let
     in
     (if e.success then e.value else { error = fn { }; }) // { __functor = _self: fn; };
 
-  stringAsChars =
-    func: string:
-    builtins.concatStringsSep "" (
-      builtins.genList (index: func (builtins.substring index 1 string)) (builtins.stringLength string)
-    );
-
   # If the environment variable NPINS_OVERRIDE_${name} is set, then use
   # the path directly as opposed to the fetched source.
   # (Taken from Niv for compatibility)
@@ -32,7 +26,11 @@ let
     name: path:
     let
       envVarName = "NPINS_OVERRIDE_${saneName}";
-      saneName = stringAsChars (c: if (builtins.match "[a-zA-Z0-9]" c) == null then "_" else c) name;
+      saneName = builtins.concatStringsSep "_" (
+        builtins.concatLists (
+          (builtins.filter (x: builtins.isList x && x != [ "" ]) (builtins.split "([a-zA-Z0-9]*)" name))
+        )
+      );
       ersatz = builtins.getEnv envVarName;
     in
     if ersatz == "" then
