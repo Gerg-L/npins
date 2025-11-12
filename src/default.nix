@@ -26,6 +26,7 @@ let
     name: path:
     let
       envVarName = "NPINS_OVERRIDE_${saneName}";
+       #this can be all done in a fold'
       saneName = builtins.concatStringsSep "_" (
         builtins.concatLists (
           (builtins.filter (x: builtins.isList x && x != [ "" ]) (builtins.split "([a-zA-Z0-9]*)" name))
