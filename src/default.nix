@@ -52,58 +52,100 @@ let
     }:
     assert spec ? type;
     let
-      # Unify across builtin and pkgs fetchers.
-      # `fetchGit` requires a wrapper because of slight API differences.
-      fetchers =
-        if pkgs == null then
-          {
-            inherit (builtins) fetchTarball fetchurl;
-            # For some fucking reason, fetchGit has a different signature than the other builtin fetchers …
-            fetchGit = args: (builtins.fetchGit args).outPath;
-          }
-        else
-          {
-            fetchTarball =
+      path =
+        let
+          sharedGitArgs = repo: rec {
+            name =
+              let
+                matched = builtins.match "^.*/([^/]*)(\\.git)?$" url;
+                appendShort =
+                  if (builtins.match "[a-f0-9]*" spec.revision) != null then
+                    "-${builtins.substring 0 7 spec.revision}"
+                  else
+                    "";
+              in
+              "${if matched == null then "source" else builtins.head matched}${appendShort}";
+
+            url =
               {
-                url,
-                sha256,
-              }:
-              pkgs.fetchzip {
-                inherit url sha256;
+                Git = repo.url;
+                GitHub = "https://github.com/${repo.owner}/${repo.repo}.git";
+                GitLab = "${repo.server}/${repo.repo_path}.git";
+                Forgejo = "${repo.server}/${repo.owner}/${repo.repo}.git";
+              }
+              .${repo.type} or (throw "Unrecognized repository type ${repo.type}");
+          };
+        in
+        (
+          if pkgs == null then
+            (rec {
+              GitRelease = Git;
+
+              Channel = Tarball;
+
+              Git =
+                assert spec.repository ? type;
+                if spec.url or null != null && !spec.submodules then
+                  Tarball
+                else
+                  (builtins.fetchGit (
+                    sharedGitArgs spec.repository
+                    // {
+                      inherit (spec) submodules;
+                      rev = spec.revision;
+                      narHash = spec.hash;
+                    }
+                  )).outPath;
+
+              PyPi = builtins.fetchurl {
+                inherit (spec) url;
+                sha256 = spec.hash;
+              };
+
+              Tarball = builtins.fetchTarball {
+                url = spec.locked_url or spec.url;
+                sha256 = spec.hash;
+              };
+
+              Container = builtins.throw "container sources require passing in a Nixpkgs value: https://github.com/andir/npins/blob/master/README.md#using-the-nixpkgs-fetchers";
+            })
+          else
+            (rec {
+              GitRelease = Git;
+              Channel = Tarball;
+
+              Git =
+                assert spec.repository ? type;
+                # At the moment, either it is a plain git repository (which has an url), or it is a GitHub/GitLab repository
+                # In the latter case, there we will always be an url to the tarball
+                if spec.url != null && !spec.submodules then
+                  Tarball
+                else
+                  pkgs.fetchGit (
+                    sharedGitArgs spec.repository
+                    // {
+                      rev = spec.revision;
+                      inherit (spec) hash;
+                      fetchSubmodules = spec.submodules;
+                    }
+                  );
+
+              PyPi = pkgs.fetchurl {
+                inherit (spec) url hash;
+              };
+
+              Tarball = pkgs.fetchzip {
+                inherit (spec) url hash;
                 extension = "tar";
               };
-            inherit (pkgs) fetchurl;
-            fetchGit =
-              {
-                url,
-                submodules,
-                rev,
-                name,
-                narHash,
-              }:
-              pkgs.fetchgit {
-                inherit url rev name;
-                fetchSubmodules = submodules;
-                hash = narHash;
-              };
-          };
 
-      # Dispatch to the correct code path based on the type
-      path =
-        if spec.type == "Git" then
-          mkGitSource fetchers spec
-        else if spec.type == "GitRelease" then
-          mkGitSource fetchers spec
-        else if spec.type == "PyPi" then
-          mkPyPiSource fetchers spec
-        else if spec.type == "Channel" then
-          mkChannelSource fetchers spec
-        else if spec.type == "Tarball" then
-          mkTarballSource fetchers spec
-        else if spec.type == "Container" then
-          mkContainerSource pkgs spec
-        else
-          builtins.throw "Unknown source type ${spec.type}";
+              Container = pkgs.dockerTools.pullImage {
+                imageName = spec.image_name;
+                imageDigest = spec.image_digest;
+                finalImageTag = spec.image_tag;
+              };
+            })
+        ).${spec.type} or (builtins.throw "Unknown source type ${spec.type}");
     in
     spec
     // {
@@ -111,114 +153,6 @@ let
         # Override logic won't do anything if we're in pure eval
         if builtins ? currentSystem then mayOverride name path else path;
     };
-
-  mkGitSource =
-    {
-      fetchTarball,
-      fetchGit,
-      ...
-    }:
-    {
-      repository,
-      revision,
-      url ? null,
-      submodules,
-      hash,
-      ...
-    }:
-    assert repository ? type;
-    # At the moment, either it is a plain git repository (which has an url), or it is a GitHub/GitLab repository
-    # In the latter case, there we will always be an url to the tarball
-    if url != null && !submodules then
-      fetchTarball {
-        inherit url;
-        sha256 = hash;
-      }
-    else
-      let
-        url =
-          if repository.type == "Git" then
-            repository.url
-          else if repository.type == "GitHub" then
-            "https://github.com/${repository.owner}/${repository.repo}.git"
-          else if repository.type == "GitLab" then
-            "${repository.server}/${repository.repo_path}.git"
-          else if repository.type == "Forgejo" then
-            "${repository.server}/${repository.owner}/${repository.repo}.git"
-          else
-            throw "Unrecognized repository type ${repository.type}";
-        urlToName =
-          url: rev:
-          let
-            matched = builtins.match "^.*/([^/]*)(\\.git)?$" url;
-
-            short = builtins.substring 0 7 rev;
-
-            appendShort = if (builtins.match "[a-f0-9]*" rev) != null then "-${short}" else "";
-          in
-          "${if matched == null then "source" else builtins.head matched}${appendShort}";
-        name = urlToName url revision;
-      in
-      fetchGit {
-        rev = revision;
-        narHash = hash;
-
-        inherit name submodules url;
-      };
-
-  mkPyPiSource =
-    { fetchurl, ... }:
-    {
-      url,
-      hash,
-      ...
-    }:
-    fetchurl {
-      inherit url;
-      sha256 = hash;
-    };
-
-  mkChannelSource =
-    { fetchTarball, ... }:
-    {
-      url,
-      hash,
-      ...
-    }:
-    fetchTarball {
-      inherit url;
-      sha256 = hash;
-    };
-
-  mkTarballSource =
-    { fetchTarball, ... }:
-    {
-      url,
-      locked_url ? url,
-      hash,
-      ...
-    }:
-    fetchTarball {
-      url = locked_url;
-      sha256 = hash;
-    };
-
-  mkContainerSource =
-    pkgs:
-    {
-      image_name,
-      image_tag,
-      image_digest,
-      ...
-    }:
-    if pkgs == null then
-      builtins.throw "container sources require passing in a Nixpkgs value: https://github.com/andir/npins/blob/master/README.md#using-the-nixpkgs-fetchers"
-    else
-      pkgs.dockerTools.pullImage {
-        imageName = image_name;
-        imageDigest = image_digest;
-        finalImageTag = image_tag;
-      };
 in
 mkFunctor (
   {
@@ -239,7 +173,7 @@ mkFunctor (
         input
       else
         throw "Unsupported input type ${builtins.typeOf input}, must be a path or an attrset";
-    version = data.version;
+    inherit (data) version;
   in
   if version == 7 then
     builtins.mapAttrs (
